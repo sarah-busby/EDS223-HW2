@@ -1,0 +1,30 @@
+
+```{r}
+# Import libraries
+library(sf)
+library(tmap)
+library(tidyverse)
+library(here)
+library(stars)
+```
+
+
+```{r}
+# Read in ejscreen data
+ejscreen <- sf::st_read(here::here("data", "ejscreen","EJSCREEN_2023_BG_StatePct_with_AS_CNMI_GU_VI.gdb")) 
+
+# Read in HOLC Redlining data
+holc <- sf::st_read(here::here("data", "mapping-inequality","mapping-inequality-los-angeles.json"))
+
+# Read in Bike and Pedesdtrian Crash data
+crashes <- sf::st_read(here::here("data", "SWITRS_LA","Crashes.csv"))
+```
+
+```{r}
+# Read in Bike and Pedesdtrian Crash data
+crashes <- read_csv(here::here("data", "SWITRS_LA","Crashes.csv"))
+```
+
+```{r}
+head(crashes)
+```
