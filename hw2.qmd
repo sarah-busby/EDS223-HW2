@@ -1,4 +1,7 @@
+# Homework Assignment 2
+Exploring patterns of environmental justice
 
+## Import libraries and read data for analyses
 ```{r}
 # Import libraries
 library(sf)
@@ -8,23 +11,95 @@ library(here)
 library(stars)
 ```
 
-
 ```{r}
 # Read in ejscreen data
-ejscreen <- sf::st_read(here::here("data", "ejscreen","EJSCREEN_2023_BG_StatePct_with_AS_CNMI_GU_VI.gdb")) 
+ejscreen <- sf::st_read(here::here("EDS223-HW2", "data", "ejscreen", "EJSCREEN_2023_BG_StatePct_with_AS_CNMI_GU_VI.gdb")) 
 
 # Read in HOLC Redlining data
-holc <- sf::st_read(here::here("data", "mapping-inequality","mapping-inequality-los-angeles.json"))
-
-# Read in Bike and Pedesdtrian Crash data
-crashes <- sf::st_read(here::here("data", "SWITRS_LA","Crashes.csv"))
+holc <- sf::st_read(here::here("EDS223-HW2", "data", "mapping-inequality","mapping-inequality-los-angeles.json"))
 ```
 
 ```{r}
 # Read in Bike and Pedesdtrian Crash data
-crashes <- read_csv(here::here("data", "SWITRS_LA","Crashes.csv"))
+crashes <- read_csv(here::here("EDS223-HW2", "data", "SWITRS_LA","Crashes.csv"))
 ```
 
 ```{r}
-head(crashes)
+# Check if ejscreen and holc have same crs
+st_crs(ejscreen) == st_crs(holc)
+
+# Transform crs to match
+holc <- st_transform(holc, crs = st_crs(ejscreen))
+
+# Check crs
+st_crs(ejscreen) == st_crs(holc)
 ```
+
+## Part 1: Legacy of redlining in current environmental (in)justice
+
+### 1.1 Mapping HOLC neighborhoods in LA County
+```{r}
+# Filter to Los Angeles County
+la_county <- ejscreen |> 
+    dplyr::filter(CNTY_NAME %in% c("Los Angeles County"))
+```
+
+```{r}
+tm_shape(holc) +
+    tm_polygons(
+        fill = 'grade',
+        fill.legend = tm_legend(title = "HOLC Grade", position = tm_pos_out('right')),
+        fill.scale = tm_scale_categorical(values = c("A" = "#76a865", "B" = "#7cb5bd", "C" = "#ffff00", "D" = "#d9838d"), value.na = "#ffffff")
+    ) +
+tm_shape(la_county) +
+    tm_borders() +
+    tm_title("Los Angeles County HOLC Neighborhoods")
+```
+
+### 1.2 Summarizing data
+
+```{r}
+# Join holc letter grades to ejscreen
+ej_holc <- st_join(la_county, holc, join = st_intersects) |> 
+    st_drop_geometry()
+```
+
+
+```{r}
+summary <- ej_holc |> 
+    group_by(grade) |> 
+    summarize(n_blocks = n()) |> 
+    mutate(pct_blocks = n_blocks/sum(n_blocks)*100)
+
+print(summary)
+```
+
+### 1.3 Visualizing current conditions
+```{r}
+ej_by_holc <- ej_holc |> 
+    group_by(grade)
+
+# Calculate mean % low income by grade
+pct_low_income <- ej_by_holc |> 
+    summarize(mean_pct_low_income = mean(LOWINCPCT)*100)
+
+# Calculate mean percentile for PM 2.5
+pctl_pm25 <- ej_by_holc |> 
+    summarize(mean_pctl_pm25 = mean(P_PM25))
+
+# Calculate mean percentile low life expectancy
+pctl_life_exp <- ej_by_holc |> 
+    summarize(mean_pctl_life_exp = mean(P_LIFEEXPPCT, na.rm = TRUE))
+```
+
+```{r}
+ggplot(
+    data = pct_low_income,
+    mapping = aes(x = grade, y = mean_pct_low_income)
+    ) +
+    geom_col() #fill = c("A" = "#76a865", "B" = "#7cb5bd", "C" = "#ffff00", "D" = "#d9838d"), value.na = "#ffffff")
+```
+
+### 1.4 Reflection
+
+## Part 2: Legacy of redlining in pedstrian and bike accidents
