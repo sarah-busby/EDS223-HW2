@@ -49,10 +49,11 @@ tm_shape(holc) +
     tm_polygons(
         fill = 'grade',
         fill.legend = tm_legend(title = "HOLC Grade", position = tm_pos_out('right')),
-        fill.scale = tm_scale_categorical(values = c("A" = "#76a865", "B" = "#7cb5bd", "C" = "#ffff00", "D" = "#d9838d"), value.na = "#ffffff")
+        fill.scale = tm_scale_categorical(values = c("A" = "#76a865", "B" = "#7cb5bd", "C" = "#ffff00", "D" = "#d9838d"), value.na = "#ffffff"),
+        lwd = 0.5
     ) +
 tm_shape(la_county) +
-    tm_borders() +
+    tm_borders(lwd = 0.5) +
     tm_title("Los Angeles County HOLC Neighborhoods")
 ```
 
