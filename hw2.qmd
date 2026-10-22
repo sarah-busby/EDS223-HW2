@@ -9,30 +9,48 @@ library(tmap)
 library(tidyverse)
 library(here)
 library(stars)
+library(kableExtra)
 ```
 
 ```{r}
 # Read in ejscreen data
-ejscreen <- sf::st_read(here::here("EDS223-HW2", "data", "ejscreen", "EJSCREEN_2023_BG_StatePct_with_AS_CNMI_GU_VI.gdb")) 
+ejscreen <- sf::st_read(here::here("data", "ejscreen", "EJSCREEN_2023_BG_StatePct_with_AS_CNMI_GU_VI.gdb")) 
 
-# Read in HOLC Redlining data
-holc <- sf::st_read(here::here("EDS223-HW2", "data", "mapping-inequality","mapping-inequality-los-angeles.json"))
+# Read in HOLC grade data
+holc <- sf::st_read(here::here("data", "mapping-inequality","mapping-inequality-los-angeles.json")) |> 
+    select(grade)
+
+# Fix holc geometries
+holc <- st_make_valid(holc)
+
+# Check if holc crs matches ejscreen
+if(st_crs(holc) != st_crs(ejscreen)){
+  warning("Coordinate refrence systems do not match. CRS transformed to match HOLC")
+  ejscreen <- st_transform(ejscreen, crs = st_crs(holc))
+}
+
+# Confirm CRS transformation
+if(st_crs(holc) == st_crs(ejscreen)){
+    print("CRS matches")
+}
 ```
 
 ```{r}
 # Read in Bike and Pedesdtrian Crash data
-crashes <- read_csv(here::here("EDS223-HW2", "data", "SWITRS_LA","Crashes.csv"))
-```
+crashes <- read_csv(here::here("data", "SWITRS_LA","Crashes.csv")) |>
+    drop_na(POINT_X, POINT_Y) |> 
+    st_as_sf(coords = c('POINT_X', 'POINT_Y'), crs = 4326) # CRS specified in the metadata
 
-```{r}
-# Check if ejscreen and holc have same crs
-st_crs(ejscreen) == st_crs(holc)
+# Check if crashes crs matches ejscreen
+if(st_crs(crashes) != st_crs(holc)){
+  warning("Initial coordinate refrence systems do not match. CRS transformed to match HOLC.")
+  crashes <- st_transform(crashes, crs = st_crs(holc))
+}
 
-# Transform crs to match
-holc <- st_transform(holc, crs = st_crs(ejscreen))
-
-# Check crs
-st_crs(ejscreen) == st_crs(holc)
+# Confirm CRS transformation
+if(st_crs(crashes) == st_crs(holc)){
+    print("CRS matches")
+}
 ```
 
 ## Part 1: Legacy of redlining in current environmental (in)justice
@@ -41,52 +59,64 @@ st_crs(ejscreen) == st_crs(holc)
 ```{r}
 # Filter to Los Angeles County
 la_county <- ejscreen |> 
-    dplyr::filter(CNTY_NAME %in% c("Los Angeles County"))
+    dplyr::filter(STATE_NAME == "California", CNTY_NAME %in% c("Los Angeles County"))
 ```
 
 ```{r}
+# Create color palette for HOLC Grade visualizations
+holc_color <- c("A" = "#76a865",
+                "B" = "#7cb5bd", 
+                "C" = "#ffff00",
+                "D" = "#d9838d",
+                na.value = "#A9A9A9"
+    )
+```
+
+```{r}
+# Map LA neighborhoods by HOLC grade
+tm_basemap(server = "Esri.WorldTopoMap") +
 tm_shape(holc) +
     tm_polygons(
         fill = 'grade',
         fill.legend = tm_legend(title = "HOLC Grade", position = tm_pos_out('right')),
-        fill.scale = tm_scale_categorical(values = c("A" = "#76a865", "B" = "#7cb5bd", "C" = "#ffff00", "D" = "#d9838d"), value.na = "#ffffff"),
-        lwd = 0.5
+        fill.scale = tm_scale_categorical(values = holc_color),
+        lwd = 0.5, fill_alpha = 0.5
     ) +
-tm_shape(la_county) +
-    tm_borders(lwd = 0.5) +
-    tm_title("Los Angeles County HOLC Neighborhoods")
+    tm_title("HOLC Grade Designations for LA County Neighborhoods") +
+    tm_compass(position = c("left", "bottom")) +
+    tm_scalebar(position = c("left", "bottom"))
 ```
 
 ### 1.2 Summarizing data
 
 ```{r}
-# Join holc letter grades to ejscreen
-ej_holc <- st_join(la_county, holc, join = st_intersects) |> 
-    st_drop_geometry()
+# Join holc grades to ejscreen
+ej_by_holc <- st_join(la_county, holc, join = st_intersects) |> 
+    st_drop_geometry() |> 
+    group_by(grade)   # Group by HOLC grade
 ```
 
-
 ```{r}
-summary <- ej_holc |> 
-    group_by(grade) |> 
+# Find percent of la census blocks in each HOLC grade
+summary <- ej_by_holc |> 
     summarize(n_blocks = n()) |> 
     mutate(pct_blocks = n_blocks/sum(n_blocks)*100)
 
-print(summary)
+# Convert to kable for rendering
+summary[c('grade', 'pct_blocks')] |> 
+  kable(col.names = c("HOLC Grade Designation", "Percent of LA Census Block Groups within Grade")) |> 
+  kable_styling(bootstrap_options = "striped")
 ```
 
 ### 1.3 Visualizing current conditions
 ```{r}
-ej_by_holc <- ej_holc |> 
-    group_by(grade)
-
 # Calculate mean % low income by grade
 pct_low_income <- ej_by_holc |> 
-    summarize(mean_pct_low_income = mean(LOWINCPCT)*100)
+    summarize(mean_pct_low_income = mean(LOWINCPCT, na.rm = TRUE)*100)
 
 # Calculate mean percentile for PM 2.5
 pctl_pm25 <- ej_by_holc |> 
-    summarize(mean_pctl_pm25 = mean(P_PM25))
+    summarize(mean_pctl_pm25 = mean(P_PM25, na.rm = TRUE))
 
 # Calculate mean percentile low life expectancy
 pctl_life_exp <- ej_by_holc |> 
@@ -94,13 +124,90 @@ pctl_life_exp <- ej_by_holc |>
 ```
 
 ```{r}
+# Plot mean % low income
 ggplot(
     data = pct_low_income,
     mapping = aes(x = grade, y = mean_pct_low_income)
-    ) +
-    geom_col() #fill = c("A" = "#76a865", "B" = "#7cb5bd", "C" = "#ffff00", "D" = "#d9838d"), value.na = "#ffffff")
+) + 
+    geom_col(fill = holc_color) +
+    labs(title = "Average Percent Low Income for LA Census Blocks by HOLC Grade",
+    x = "HOLC Grade",
+    y = "Mean percent low income"
+    )
+```
+
+```{r}
+# Plot mean percentile for PM 2.5
+ggplot(
+    data = pctl_pm25,
+    mapping = aes(x = grade, y = mean_pctl_pm25)
+) + 
+    geom_col(fill = holc_color) +
+    labs(title = "Average Percentile for Particulate Matter 2.5 of LA Census Blocks by HOLC Grade",
+    x = "HOLC Grade",
+    y = "Mean percentile for PM 2.5"
+    )
+```
+
+```{r}
+# Plot mean percentile for low life expectancy
+ggplot(
+    data = pctl_life_exp,
+    mapping = aes(x = grade, y = mean_pctl_life_exp, fill = holc_color)
+) +
+    geom_col(fill = holc_color) +
+    labs(title = "Average Percentile for Low Life Expectancy of LA Census Blocks by HOLC Grade",
+    x = "HOLC Grade",
+    y = "Mean percentile for low life expectancy"
+    )
 ```
 
 ### 1.4 Reflection
 
 ## Part 2: Legacy of redlining in pedstrian and bike accidents
+
+### 2.1 Percent observations within redlined neighborhoods
+
+```{r}
+# Check if crashes CRS matches holc data
+if(st_crs(crashes) != st_crs(holc)){
+  warning("Initial coordinate refrence systems do not match. CRS transformed to match HOLC.")
+  crashes <- st_transform(crashes, crs = st_crs(holc))
+}
+
+# Confirm CRS transformation
+if(st_crs(crashes) == st_crs(holc)){
+    print("CRS matches")
+}
+```
+
+```{r}
+# Filter crashes involving bikes or pedestrians
+bike_ped_crashes <- crashes |> 
+    filter(PEDESTRIAN_ACCIDENT == "Y" | BICYCLE_ACCIDENT == "Y")
+    
+```
+
+```{r}
+crashes_in_holc <- st_join(holc, bike_ped_crashes, join = st_intersects) |> 
+    st_drop_geometry()
+```
+
+```{r}
+pct_crashes_by_grade <- crashes_in_holc |> 
+    group_by(grade) |> 
+    summarize(count = n()) |> 
+    mutate(pct_crashes_in_grade = count/sum(count)*100)
+pct_crashes_by_grade
+```
+
+```{r}
+ggplot(
+    data = pct_crashes_by_grade,
+    mapping = aes(x = grade, y = pct_crashes_in_grade)
+) + geom_col(fill = holc_color) +
+    labs(title = "Percent of Bike and Pedestrian Crashes in LA HOLC grades",
+    x = "HOLC Grade",
+    y = "Percent of crash observations within grade"
+    )
+```
